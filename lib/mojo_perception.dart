@@ -60,7 +60,7 @@ class MojoPerceptionAPI {
   late String socketIoUri;
 
   /// Socket io
-  late io.Socket apiSocket;
+  //late io.Socket apiSocket;
 
   /// Set to false to stop sending to the API
   bool sending = false;
@@ -134,6 +134,9 @@ class MojoPerceptionAPI {
   /// Called on face detected
   late Function faceDetectedCallback;
 
+  /// Called on face detected
+  late Function facemeshDetectedCallback;
+
   /// Called on no face detected
   late Function noFaceDetectedCallback;
 
@@ -185,6 +188,7 @@ class MojoPerceptionAPI {
     onStopCallback = defaultOnStopCallback;
     firstEmitDoneCallback = defaultFirstEmitDoneFallback;
     faceDetectedCallback = defaultDataCallback;
+    facemeshDetectedCallback = defaultDataCallback;
     noFaceDetectedCallback = defaultNoDataCallback;
   }
 
@@ -322,17 +326,25 @@ class MojoPerceptionAPI {
 
     double xMargin = detectedFace.width * 0.25 / 2;
     double yMargin = detectedFace.height * 0.25 / 2;
+    int left = (detectedFace.topLeft.dx - xMargin).round();
+    int top = (detectedFace.topLeft.dy - yMargin).round();
     img.Image cropped = img.copyCrop(
         image!,
-        (detectedFace.topLeft.dx - xMargin).round(),
-        (detectedFace.topLeft.dy - yMargin).round(),
+        left,
+        top,
         (detectedFace.width + xMargin).round(),
         (detectedFace.height + yMargin).round());
 
     var result = await facemeshInference(cameraImage: cropped);
 
     if (result != null) {
-      emitFacemesh(result["facemesh"]);
+      List<List<double>> facemesh = result["facemesh"];
+      for (int i = 0; i < facemesh.length; i++) {
+        facemesh[i][0] = facemesh[i][0] + left;
+        facemesh[i][1] = facemesh[i][1] + top;
+      }
+      facemeshDetectedCallback(facemesh);
+      emitFacemesh(facemesh);
     }
   }
 
@@ -362,11 +374,12 @@ class MojoPerceptionAPI {
     );
     await cameraController!.initialize();
 
-    await cameraController!.startImageStream(
+    cameraController!.startImageStream(
           (CameraImage cameraImage) async {
         await handleCameraImage(cameraImage);
       },
     );
+/*
     apiSocket = io.io(
         socketIoUri,
         io.OptionBuilder()
@@ -392,6 +405,7 @@ class MojoPerceptionAPI {
     });
     apiSocket.onConnectError((data) => onErrorCallback(data));
     apiSocket.connect();
+*/
     return cameraController;
   }
 
@@ -468,6 +482,7 @@ class MojoPerceptionAPI {
       if (facemesh == null) {
         return;
       }
+/*
       apiSocket.emit('facemesh', {
         'facemesh': facemesh,
         'token': authToken,
@@ -479,6 +494,7 @@ class MojoPerceptionAPI {
         sending = true;
         firstEmitDoneCallback();
       }
+*/
     } catch (e) {
       onErrorCallback(e);
     }
@@ -494,7 +510,7 @@ class MojoPerceptionAPI {
       sending = false;
 
       /// disconnect from API
-      apiSocket.disconnect();
+      //apiSocket.disconnect();
       onStopCallback();
       if (cameraController!.value.isStreamingImages) {
         await cameraController?.stopImageStream();

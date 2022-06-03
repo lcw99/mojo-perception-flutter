@@ -5,6 +5,8 @@ import 'package:tflite_flutter_helper/tflite_flutter_helper.dart';
 
 /// FaceMeshService runs predictions for anonymized landmarks
 class FaceMeshService {
+  final int inputSize = 192;
+
   final Logger logger = Logger("FaceMeshService");
 
   /// Tflite [Interpreter] to evaluate tflite model
@@ -63,7 +65,8 @@ class FaceMeshService {
 
     interpreter.runForMultipleInputs(inputs, outputs);
 
-    final score = outputScores.getDoubleList()[0];
+    final scores = outputScores.getDoubleList();
+    final score = scores[0];
     if (score < 0) {
       return null;
     }
@@ -74,13 +77,13 @@ class FaceMeshService {
 
     final landmarkResults = <List<double>>[];
     for (var point in landmarkPoints) {
-      landmarkResults.add([point[0], point[1], point[2]]);
+      landmarkResults.add([point[0] / inputSize * image.width, point[1] / inputSize * image.height, point[2]]);
     }
     for (var point in leftIrisPoints) {
-      landmarkResults.add([point[0], point[1], 0]);
+      landmarkResults.add([point[0] / inputSize * image.width, point[1] / inputSize * image.height, 0]);
     }
     for (var point in rightIrisPoints) {
-      landmarkResults.add([point[0], point[1], 0]);
+      landmarkResults.add([point[0] / inputSize * image.width, point[1] / inputSize * image.height, 0]);
     }
 
     return {'facemesh': landmarkResults};

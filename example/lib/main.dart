@@ -1,4 +1,7 @@
+import 'dart:ui';
+
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mojo_perception/mojo_perception.dart';
 import 'package:syncfusion_flutter_core/theme.dart';
@@ -26,6 +29,7 @@ class CameraApp extends StatefulWidget {
 
 class _CameraAppState extends State<CameraApp> {
   bool isStopped = false;
+  bool isRunning = false;
 
   void stopCallback() {
     setState(() {
@@ -34,17 +38,21 @@ class _CameraAppState extends State<CameraApp> {
   }
 
   void errorCallback(error) {
-    print("🔴 $error");
+    if (kDebugMode) {
+      print("🔴 $error");
+    }
   }
 
   @override
   void dispose() {
+    super.dispose();
     widget.mojoPerceptionApi.stopFacialExpressionRecognitionAPI();
   }
 
+  @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance?.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.mojoPerceptionApi.onStopCallback = stopCallback;
       widget.mojoPerceptionApi.onErrorCallback = errorCallback;
     });
@@ -56,6 +64,19 @@ class _CameraAppState extends State<CameraApp> {
       home: Scaffold(
         body: isStopped
             ? const Center(child: Text("Session ended"))
+            : !isRunning
+            ? Center(child: ElevatedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    isRunning = true;
+                  });
+                },
+                icon: const Icon(
+                  Icons.run_circle,
+                  size: 50.0,
+                ),
+                label: const Text('Run'),
+            ))
             : FutureBuilder<CameraController?>(
                 future: widget.mojoPerceptionApi.startCameraAndConnectAPI(),
                 builder: (BuildContext context,
@@ -67,7 +88,7 @@ class _CameraAppState extends State<CameraApp> {
                           CameraPreview(
                               widget.mojoPerceptionApi.cameraController!),
                           FaceWidget(widget.mojoPerceptionApi),
-                          AmusementWidget(widget.mojoPerceptionApi)
+                          //AmusementWidget(widget.mojoPerceptionApi)
                         ],
                       ),
                     );
@@ -91,8 +112,10 @@ class _FaceWidgetState extends State<FaceWidget> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance?.addPostFrameCallback(
+    WidgetsBinding.instance.addPostFrameCallback(
         (_) => widget.mojoPerceptionApi.faceDetectedCallback = myCallback);
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => widget.mojoPerceptionApi.facemeshDetectedCallback = facemeshCallback);
   }
 
   Rect? face;
@@ -102,13 +125,23 @@ class _FaceWidgetState extends State<FaceWidget> {
     });
   }
 
+  List<List<double>>? facemesh;
+  void facemeshCallback(newFacemesh) {
+    setState(() {
+      facemesh = newFacemesh;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
     double _ratio = screenSize.width /
         widget.mojoPerceptionApi.cameraController!.value.previewSize!.height;
     return face != null
-        ? CustomPaint(painter: FaceDetectionPainter(face!, _ratio))
+        ? Stack(children: [
+            CustomPaint(painter: FaceDetectionPainter(face!, _ratio)),
+            CustomPaint(painter: FacemeshPainter(facemesh, _ratio)),
+          ])
         : Container();
   }
 }
@@ -128,11 +161,68 @@ class FaceDetectionPainter extends CustomPainter {
       var paint = Paint()
         ..color = Colors.blue
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3;
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round;
 
       Offset topleft = bbox.topLeft * ratio;
       Offset bottomright = bbox.bottomRight * ratio;
       canvas.drawRect(Rect.fromPoints(topleft, bottomright), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => true;
+}
+
+class FacemeshPainter extends CustomPainter {
+  final List<List<double>>? facemesh;
+  final double ratio;
+
+  FacemeshPainter(
+      this.facemesh,
+      this.ratio,
+      );
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    List<int> leftEye = [384, 385, 386, 387, 388, 390, 263, 362, 398, 466, 373, 374, 249, 380, 381, 382];
+    List<int> rightEye = [160, 33, 161, 163, 133, 7, 173, 144, 145, 246, 153, 154, 155, 157, 158, 159];
+    if (facemesh != null) {
+      var paint = Paint()
+        ..color = Colors.blue
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round;
+
+      List<Offset> mesh = [];
+      for (int i in leftEye) {
+        List<double> lm = facemesh![i];
+        mesh.add(Offset(lm[0], lm[1]) * ratio);
+      }
+      canvas.drawPoints(PointMode.points, mesh, paint);
+
+      mesh = [];
+      for (int i in rightEye) {
+        List<double> lm = facemesh![i];
+        mesh.add(Offset(lm[0], lm[1]) * ratio);
+      }
+      canvas.drawPoints(PointMode.points, mesh, paint);
+
+      paint.color = Colors.yellow;
+      List<Offset> leftIris = [];
+      for (int i = 0; i < 5; i++) {
+        List<double> lm = facemesh![468 + i];
+        leftIris.add(Offset(lm[0], lm[1]) * ratio);
+      }
+      List<Offset> rightIris = [];
+      for (int i = 0; i < 5; i++) {
+        List<double> lm = facemesh![468 + 5 + i];
+        rightIris.add(Offset(lm[0], lm[1]) * ratio);
+      }
+      canvas.drawPoints(PointMode.points, leftIris, paint);
+      canvas.drawPoints(PointMode.points, rightIris, paint);
+
+      canvas.drawLine(leftIris[0], rightIris[0], paint);
     }
   }
 
@@ -171,7 +261,7 @@ class _AmusementWidgetState extends State<AmusementWidget> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance?.addPostFrameCallback(
+    WidgetsBinding.instance.addPostFrameCallback(
         (_) => widget.mojoPerceptionApi.amusementCallback = amusementCallback);
   }
 
