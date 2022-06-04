@@ -1,5 +1,5 @@
-name: example
-description: A new Flutter project.
+name: measure_face
+description: measure face sizes
 
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -38,6 +38,7 @@ dependencies:
     path: ../
   syncfusion_flutter_sliders: ^20.1.47
   syncfusion_flutter_core: ^20.1.47
+  google_fonts:
 
 dev_dependencies:
   flutter_test:

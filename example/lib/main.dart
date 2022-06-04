@@ -1,4 +1,7 @@
-import 'dart:ui';
+import 'dart:async';
+import 'dart:developer';
+import 'dart:typed_data';
+import 'dart:ui' as UI;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -6,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:mojo_perception/mojo_perception.dart';
 import 'package:syncfusion_flutter_core/theme.dart';
 import 'package:syncfusion_flutter_sliders/sliders.dart';
+import 'package:image/image.dart' as img;
+import 'package:google_fonts/google_fonts.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -102,13 +107,15 @@ class _CameraAppState extends State<CameraApp> {
 }
 
 class FaceWidget extends StatefulWidget {
-  MojoPerceptionAPI mojoPerceptionApi;
-  FaceWidget(this.mojoPerceptionApi);
+  final MojoPerceptionAPI mojoPerceptionApi;
+  const FaceWidget(this.mojoPerceptionApi, {Key? key}) : super(key: key);
   @override
   _FaceWidgetState createState() => _FaceWidgetState();
 }
 
 class _FaceWidgetState extends State<FaceWidget> {
+  late double _ratio;
+
   @override
   void initState() {
     super.initState();
@@ -119,28 +126,41 @@ class _FaceWidgetState extends State<FaceWidget> {
   }
 
   Rect? face;
-  void myCallback(newface) {
+  void myCallback(newFace) {
     setState(() {
-      face = newface;
+      face = newFace;
     });
   }
 
   List<List<double>>? facemesh;
-  void facemeshCallback(newFacemesh) {
-    setState(() {
+  img.Image? testedImage;
+  UI.Image? testedImageUI;
+  Offset? topLeft;
+  void facemeshCallback(newFacemesh, img.Image croppedImage, offset) {
+    img.Image resizedImage = img.copyResize(croppedImage, width: (croppedImage.width * _ratio).toInt());
+    loadUiImage(resizedImage).then((image) => setState(() {
+      topLeft = offset;
       facemesh = newFacemesh;
+      testedImageUI = image;
+    }));
+  }
+
+  Future<UI.Image> loadUiImage(img.Image img1) async {
+    final Completer<UI.Image> completer = Completer();
+    UI.decodeImageFromList(Uint8List.fromList(img.JpegEncoder().encodeImage(img1)), (UI.Image img2) {
+      return completer.complete(img2);
     });
+    return completer.future;
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    double _ratio = screenSize.width /
+    _ratio = MediaQuery.of(context).size.width /
         widget.mojoPerceptionApi.cameraController!.value.previewSize!.height;
     return face != null
         ? Stack(children: [
             CustomPaint(painter: FaceDetectionPainter(face!, _ratio)),
-            CustomPaint(painter: FacemeshPainter(facemesh, _ratio)),
+            CustomPaint(painter: FacemeshPainter(facemesh, _ratio, testedImageUI, topLeft)),
           ])
         : Container();
   }
@@ -164,9 +184,9 @@ class FaceDetectionPainter extends CustomPainter {
         ..strokeWidth = 3
         ..strokeCap = StrokeCap.round;
 
-      Offset topleft = bbox.topLeft * ratio;
-      Offset bottomright = bbox.bottomRight * ratio;
-      canvas.drawRect(Rect.fromPoints(topleft, bottomright), paint);
+      Offset topLeft = bbox.topLeft * ratio;
+      Offset bottomRight = bbox.bottomRight * ratio;
+      canvas.drawRect(Rect.fromPoints(topLeft, bottomRight), paint);
     }
   }
 
@@ -177,54 +197,188 @@ class FaceDetectionPainter extends CustomPainter {
 class FacemeshPainter extends CustomPainter {
   final List<List<double>>? facemesh;
   final double ratio;
+  final UI.Image? testedImage;
+  final Offset? topLeft;
 
   FacemeshPainter(
       this.facemesh,
       this.ratio,
+      this.testedImage,
+      this.topLeft,
       );
 
   @override
   void paint(Canvas canvas, Size size) {
+    if(topLeft == null) {
+      return;
+    }
+    double ratio1 = ratio;
+    Offset topLeft1 = topLeft! * ratio1;
     List<int> leftEye = [384, 385, 386, 387, 388, 390, 263, 362, 398, 466, 373, 374, 249, 380, 381, 382];
     List<int> rightEye = [160, 33, 161, 163, 133, 7, 173, 144, 145, 246, 153, 154, 155, 157, 158, 159];
+    List<int> faceOval = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10];
+    List<int> centerLine = [0, 4, 8, 0];
+
     if (facemesh != null) {
       var paint = Paint()
         ..color = Colors.blue
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3
+        ..strokeWidth = 1
         ..strokeCap = StrokeCap.round;
+
+      if (testedImage != null) {
+        canvas.drawImage(testedImage!, topLeft1, paint);
+      }
+
+      List<Offset> landmarks = [];
+      for (int i = 0; i < 468; i++) {
+        List<double> lm = facemesh![i];
+        Offset o = Offset(lm[0], lm[1]) * ratio1 + topLeft1;
+        landmarks.add(o);
+        //drawText(canvas, o, i.toString(), 6);
+      }
+      canvas.drawPoints(UI.PointMode.points, landmarks, paint);
 
       List<Offset> mesh = [];
       for (int i in leftEye) {
         List<double> lm = facemesh![i];
-        mesh.add(Offset(lm[0], lm[1]) * ratio);
+        Offset o = Offset(lm[0], lm[1]) * ratio1 + topLeft1;
+        mesh.add(o);
+        //drawText(canvas, o, i.toString(), 6);
       }
-      canvas.drawPoints(PointMode.points, mesh, paint);
+      //canvas.drawPoints(UI.PointMode.points, mesh, paint);
 
       mesh = [];
       for (int i in rightEye) {
         List<double> lm = facemesh![i];
-        mesh.add(Offset(lm[0], lm[1]) * ratio);
+        Offset o = Offset(lm[0], lm[1]) * ratio1 + topLeft1;
+        mesh.add(o);
+        //drawText(canvas, o, i.toString(), 6);
       }
-      canvas.drawPoints(PointMode.points, mesh, paint);
+      //canvas.drawPoints(UI.PointMode.points, mesh, paint);
 
-      paint.color = Colors.yellow;
+      paint.color = Colors.yellowAccent;
       List<Offset> leftIris = [];
       for (int i = 0; i < 5; i++) {
         List<double> lm = facemesh![468 + i];
-        leftIris.add(Offset(lm[0], lm[1]) * ratio);
+        Offset o = Offset(lm[0], lm[1]) * ratio1 + topLeft1;
+        leftIris.add(o);
+        //drawText(canvas, o, i.toString(), 4, color: Colors.black);
       }
       List<Offset> rightIris = [];
       for (int i = 0; i < 5; i++) {
         List<double> lm = facemesh![468 + 5 + i];
-        rightIris.add(Offset(lm[0], lm[1]) * ratio);
+        rightIris.add(Offset(lm[0], lm[1]) * ratio1 + topLeft1);
       }
-      canvas.drawPoints(PointMode.points, leftIris, paint);
-      canvas.drawPoints(PointMode.points, rightIris, paint);
+      canvas.drawPoints(UI.PointMode.points, leftIris, paint);
+      canvas.drawPoints(UI.PointMode.points, rightIris, paint);
+
+      paint.color = Colors.white70;
+      List<Offset> faceOvalPoly = [];
+      for (int i in faceOval) {
+        List<double> lm = facemesh![i];
+        Offset o = Offset(lm[0], lm[1]) * ratio1 + topLeft1;
+        faceOvalPoly.add(o);
+        //drawText(canvas, o, i.toString(), 5, color: Colors.blue);
+      }
+      canvas.drawPoints(UI.PointMode.polygon, faceOvalPoly, paint);
+
+      List<Offset> centerTriangle = [];
+      for (int i in centerLine) {
+        List<double> lm = facemesh![i];
+        Offset o = Offset(lm[0], lm[1]) * ratio1 + topLeft1;
+        centerTriangle.add(o);
+      }
+      canvas.drawPoints(UI.PointMode.polygon, centerTriangle, paint);
 
       canvas.drawLine(leftIris[0], rightIris[0], paint);
+
+      double leftIrisSize = (leftIris[1] - leftIris[3]).distance;
+      double rightIrisSize = (rightIris[1] - rightIris[3]).distance;
+      double irisSize = (leftIrisSize + rightIrisSize) / 2;
+      double realSizeRatio = 1170 / irisSize;
+
+      double y = 5;
+      double irisDistance =(leftIris[0] - rightIris[0]).distance * realSizeRatio / 100;
+      drawText(canvas, Offset(10, y), '동공:' + irisDistance.toStringAsFixed(2), 15);
+      y += 17;
+
+      double verticalTilt = facemesh![151][0] - facemesh![200][0];
+      drawText(canvas, Offset(10, y), '세로기울기:' + verticalTilt.toStringAsFixed(2), 15);
+      y += 17;
+
+      double verticalLength = (landmarks[10] - landmarks[152]).distance * realSizeRatio / 100;
+      drawText(canvas, Offset(10, y), '길이:' + verticalLength.toStringAsFixed(2), 15);
+      y += 17;
+
+      double horizontalLength = (landmarks[127] - landmarks[356]).distance * realSizeRatio / 100;
+      drawText(canvas, Offset(10, y), '너비:' + horizontalLength.toStringAsFixed(2), 15);
+      y += 17;
+
+      double faceRate = verticalLength / horizontalLength * 100;
+      drawText(canvas, Offset(10, y), '비율:' + faceRate.toStringAsFixed(2), 15);
+      y += 17;
+
+      double migan = (landmarks[362].dx - landmarks[133].dx) * realSizeRatio / 100;
+      drawText(canvas, Offset(10, y), '미간:' + migan.toStringAsFixed(2), 15);
+      y += 17;
+
+      faceOvalPoly = faceOvalPoly.map((e) => e * realSizeRatio).toList();
+      for (int i in faceOval) {
+        List<double> lm = facemesh![i];
+        Offset o = Offset(lm[0], lm[1]) * ratio1 + topLeft1;
+        faceOvalPoly.add(o);
+        //drawText(canvas, o, i.toString(), 5, color: Colors.blue);
+      }
+      double faceArea = getArea(faceOvalPoly) / 10000;
+      drawText(canvas, Offset(10, y), '면적:' + faceArea.toStringAsFixed(2), 15);
+      y += 17;
     }
   }
+
+  double getArea(List<Offset> poly) {
+    double area = 0;
+    int n = poly.length;
+    if (n.isOdd) {
+      poly.add(poly[0]);
+      n = poly.length;
+    }
+    for(int i = 0; i < n - 2; i += 2) {
+      area += poly[i+1].dx * (poly[i+2].dy - poly[i].dy) + poly[i+1].dy * (poly[i].dx - poly[i+2].dx);
+    }
+    area /= 2;
+    return area;
+/*
+    double area = 0;
+    int n = poly.length - 1;
+    for( int i = 1; i < n; ++i ) {
+      area += poly[i].dx * (poly[i+1].dy - poly[i-1].dy);
+    }
+    area /= 2;
+    return area;
+*/
+  }
+  void drawText(Canvas canvas, Offset offset, String text, double size, {color = Colors.yellowAccent}) {
+/*
+    var textStyle = TextStyle(
+      fontFeatures: const [UI.FontFeature.tabularFigures()],
+      color: Colors.black,
+      fontSize: size,
+    );
+*/
+    var textStyle = GoogleFonts.getFont('Nanum Gothic Coding').copyWith(fontSize: size, color: color);
+    final textSpan = TextSpan(
+      text: text,
+      style: textStyle,
+    );
+    final textPainter = TextPainter(
+      text: textSpan,
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, offset);
+  }
+
 
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => true;

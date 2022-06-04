@@ -324,26 +324,28 @@ class MojoPerceptionAPI {
       image = img.flipHorizontal(image);
     }
 
-    double xMargin = detectedFace.width * 0.25 / 2;
-    double yMargin = detectedFace.height * 0.25 / 2;
+    double xMargin = detectedFace.width * 0.25;
+    double yMargin = detectedFace.height * 0.25;
     int left = (detectedFace.topLeft.dx - xMargin).round();
     int top = (detectedFace.topLeft.dy - yMargin).round();
     img.Image cropped = img.copyCrop(
         image!,
         left,
         top,
-        (detectedFace.width + xMargin).round(),
-        (detectedFace.height + yMargin).round());
+        (detectedFace.width + xMargin * 2).round(),
+        (detectedFace.height + yMargin * 2).round());
 
     var result = await facemeshInference(cameraImage: cropped);
 
     if (result != null) {
       List<List<double>> facemesh = result["facemesh"];
+/*
       for (int i = 0; i < facemesh.length; i++) {
         facemesh[i][0] = facemesh[i][0] + left;
         facemesh[i][1] = facemesh[i][1] + top;
       }
-      facemeshDetectedCallback(facemesh);
+*/
+      facemeshDetectedCallback(facemesh, cropped, Offset(left.toDouble(), top.toDouble()));
       emitFacemesh(facemesh);
     }
   }
@@ -369,7 +371,7 @@ class MojoPerceptionAPI {
     );
     cameraController = CameraController(
       cameraDescription,
-      ResolutionPreset.medium,
+      ResolutionPreset.high,
       enableAudio: false,
     );
     await cameraController!.initialize();
