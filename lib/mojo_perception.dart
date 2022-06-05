@@ -303,10 +303,17 @@ class MojoPerceptionAPI {
     }
   }
 
+  bool runningInference = true;
+  void controlInference(bool runInference) {
+    runningInference = runInference;
+  }
   /// Called at each new [cameraImage] from camera image stream
   ///
   /// Calls [facemeshInference] to get anonymized face landmarks predictions to send to the API.
   Future<void> handleCameraImage(CameraImage cameraImage) async {
+    if (!runningInference) {
+      return;
+    }
     var detection = await faceDetectionInference(cameraImage: cameraImage);
     if (detection == null) {
       return;
@@ -371,7 +378,8 @@ class MojoPerceptionAPI {
     );
     cameraController = CameraController(
       cameraDescription,
-      ResolutionPreset.high,
+      ResolutionPreset.medium,
+      //ResolutionPreset.high,
       enableAudio: false,
     );
     await cameraController!.initialize();

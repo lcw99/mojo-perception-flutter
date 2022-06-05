@@ -39,6 +39,8 @@ dependencies:
   syncfusion_flutter_sliders: ^20.1.47
   syncfusion_flutter_core: ^20.1.47
   google_fonts:
+  image_gallery_saver: ^1.7.1
+  permission_handler: ^9.2.0
 
 dev_dependencies:
   flutter_test:

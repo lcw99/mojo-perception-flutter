@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:developer';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as UI;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:mojo_perception/mojo_perception.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:syncfusion_flutter_core/theme.dart';
 import 'package:syncfusion_flutter_sliders/sliders.dart';
 import 'package:image/image.dart' as img;
@@ -65,8 +69,32 @@ class _CameraAppState extends State<CameraApp> {
 
   @override
   Widget build(BuildContext context) {
+    GlobalKey<FaceWidgetState> faceWidgetKey = GlobalKey();
+
     return MaterialApp(
       home: Scaffold(
+        floatingActionButton: FloatingActionButton(
+            child: const Icon(Icons.camera),
+            backgroundColor: Colors.green,
+            onPressed: () async {
+              widget.mojoPerceptionApi.controlInference(false);
+              if (!await Permission.storage.isGranted) {
+                await Permission.storage.request();
+              }
+              Uint8List imageBytes = await faceWidgetKey.currentState!.capturePng();
+              var result = await ImageGallerySaver.saveImage(imageBytes);
+              log('image save result=' + result.toString(), name: 'lcw');
+
+              Uint8List? lastTestedImageBytes = faceWidgetKey.currentState!.getLastTestedImage();
+              if (lastTestedImageBytes != null) {
+                result = await ImageGallerySaver.saveImage(lastTestedImageBytes);
+                log('image save result=' + result.toString(), name: 'lcw');
+              }
+              Future.delayed(const Duration(seconds: 2), () {
+                widget.mojoPerceptionApi.controlInference(true);
+              });
+            }
+        ),
         body: isStopped
             ? const Center(child: Text("Session ended"))
             : !isRunning
@@ -87,16 +115,21 @@ class _CameraAppState extends State<CameraApp> {
                 builder: (BuildContext context,
                     AsyncSnapshot<CameraController?> snapshot) {
                   if (snapshot.hasData) {
-                    return Center(
-                      child: Stack(
+                    final mediaSize = MediaQuery.of(context).size;
+                    final scale = 1 / (widget.mojoPerceptionApi.cameraController!.value.aspectRatio * MediaQuery.of(context).size.aspectRatio);
+                    FaceWidget faceWidget = FaceWidget(widget.mojoPerceptionApi, scale, key: faceWidgetKey);
+                    return Stack(
                         children: [
-                          CameraPreview(
-                              widget.mojoPerceptionApi.cameraController!),
-                          FaceWidget(widget.mojoPerceptionApi),
+                          ClipRect(
+                          clipper: _MediaSizeClipper(mediaSize),
+                          child: Transform.scale(
+                            scale: scale,
+                            alignment: Alignment.topLeft,
+                            child: CameraPreview(widget.mojoPerceptionApi.cameraController!))),
+                          faceWidget,
                           //AmusementWidget(widget.mojoPerceptionApi)
                         ],
-                      ),
-                    );
+                      );
                   } else {
                     return Container();
                   }
@@ -106,15 +139,43 @@ class _CameraAppState extends State<CameraApp> {
   }
 }
 
-class FaceWidget extends StatefulWidget {
-  final MojoPerceptionAPI mojoPerceptionApi;
-  const FaceWidget(this.mojoPerceptionApi, {Key? key}) : super(key: key);
+class _MediaSizeClipper extends CustomClipper<Rect> {
+  final Size mediaSize;
+  const _MediaSizeClipper(this.mediaSize);
   @override
-  _FaceWidgetState createState() => _FaceWidgetState();
+  Rect getClip(Size size) {
+    return Rect.fromLTWH(0, 0, mediaSize.width, mediaSize.height);
+  }
+  @override
+  bool shouldReclip(CustomClipper<Rect> oldClipper) {
+    return true;
+  }
 }
 
-class _FaceWidgetState extends State<FaceWidget> {
+class FaceWidget extends StatefulWidget {
+  final MojoPerceptionAPI mojoPerceptionApi;
+  final double scale;
+  const FaceWidget(this.mojoPerceptionApi, this.scale, {Key? key}) : super(key: key);
+  @override
+  FaceWidgetState createState() => FaceWidgetState();
+}
+
+class FaceWidgetState extends State<FaceWidget> {
   late double _ratio;
+
+  GlobalKey facePaintKey = GlobalKey();
+
+  Future<Uint8List> capturePng() async {
+    RenderRepaintBoundary boundary = facePaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary;
+    UI.Image image = await boundary.toImage();
+    ByteData? byteData = await image.toByteData(format: UI.ImageByteFormat.png);
+    Uint8List pngBytes = byteData!.buffer.asUint8List();
+    return pngBytes;
+  }
+
+  Uint8List? getLastTestedImage() {
+    return testedImage;
+  }
 
   @override
   void initState() {
@@ -133,10 +194,11 @@ class _FaceWidgetState extends State<FaceWidget> {
   }
 
   List<List<double>>? facemesh;
-  img.Image? testedImage;
+  Uint8List? testedImage;
   UI.Image? testedImageUI;
   Offset? topLeft;
   void facemeshCallback(newFacemesh, img.Image croppedImage, offset) {
+    testedImage = Uint8List.fromList(img.JpegEncoder().encodeImage(croppedImage));
     img.Image resizedImage = img.copyResize(croppedImage, width: (croppedImage.width * _ratio).toInt());
     loadUiImage(resizedImage).then((image) => setState(() {
       topLeft = offset;
@@ -153,14 +215,20 @@ class _FaceWidgetState extends State<FaceWidget> {
     return completer.future;
   }
 
+  bool showCroppedImage = true;
   @override
   Widget build(BuildContext context) {
-    _ratio = MediaQuery.of(context).size.width /
-        widget.mojoPerceptionApi.cameraController!.value.previewSize!.height;
+    var screenSize = MediaQuery.of(context).size;
+    _ratio = screenSize.width / widget.mojoPerceptionApi.cameraController!.value.previewSize!.height * widget.scale;
     return face != null
         ? Stack(children: [
-            CustomPaint(painter: FaceDetectionPainter(face!, _ratio)),
-            CustomPaint(painter: FacemeshPainter(facemesh, _ratio, testedImageUI, topLeft)),
+            //CustomPaint(painter: FaceDetectionPainter(face!, _ratio)),
+            RepaintBoundary(key: facePaintKey,
+                child: SizedBox(
+                    width: screenSize.width, height: screenSize.height,
+                    child: CustomPaint(painter: FacemeshPainter(facemesh, _ratio, testedImageUI, topLeft, showCroppedImage))
+                )
+            )
           ])
         : Container();
   }
@@ -199,12 +267,14 @@ class FacemeshPainter extends CustomPainter {
   final double ratio;
   final UI.Image? testedImage;
   final Offset? topLeft;
+  final bool showImage;
 
   FacemeshPainter(
       this.facemesh,
       this.ratio,
       this.testedImage,
       this.topLeft,
+      this.showImage,
       );
 
   @override
@@ -226,7 +296,7 @@ class FacemeshPainter extends CustomPainter {
         ..strokeWidth = 1
         ..strokeCap = StrokeCap.round;
 
-      if (testedImage != null) {
+      if (testedImage != null && showImage) {
         canvas.drawImage(testedImage!, topLeft1, paint);
       }
 
@@ -237,7 +307,7 @@ class FacemeshPainter extends CustomPainter {
         landmarks.add(o);
         //drawText(canvas, o, i.toString(), 6);
       }
-      canvas.drawPoints(UI.PointMode.points, landmarks, paint);
+      //canvas.drawPoints(UI.PointMode.points, landmarks, paint);
 
       List<Offset> mesh = [];
       for (int i in leftEye) {
@@ -298,7 +368,7 @@ class FacemeshPainter extends CustomPainter {
       double irisSize = (leftIrisSize + rightIrisSize) / 2;
       double realSizeRatio = 1170 / irisSize;
 
-      double y = 5;
+      double y = 40;
       double irisDistance =(leftIris[0] - rightIris[0]).distance * realSizeRatio / 100;
       drawText(canvas, Offset(10, y), '동공:' + irisDistance.toStringAsFixed(2), 15);
       y += 17;
@@ -324,12 +394,6 @@ class FacemeshPainter extends CustomPainter {
       y += 17;
 
       faceOvalPoly = faceOvalPoly.map((e) => e * realSizeRatio).toList();
-      for (int i in faceOval) {
-        List<double> lm = facemesh![i];
-        Offset o = Offset(lm[0], lm[1]) * ratio1 + topLeft1;
-        faceOvalPoly.add(o);
-        //drawText(canvas, o, i.toString(), 5, color: Colors.blue);
-      }
       double faceArea = getArea(faceOvalPoly) / 10000;
       drawText(canvas, Offset(10, y), '면적:' + faceArea.toStringAsFixed(2), 15);
       y += 17;
@@ -337,6 +401,7 @@ class FacemeshPainter extends CustomPainter {
   }
 
   double getArea(List<Offset> poly) {
+/*
     double area = 0;
     int n = poly.length;
     if (n.isOdd) {
@@ -348,15 +413,17 @@ class FacemeshPainter extends CustomPainter {
     }
     area /= 2;
     return area;
-/*
-    double area = 0;
-    int n = poly.length - 1;
-    for( int i = 1; i < n; ++i ) {
-      area += poly[i].dx * (poly[i+1].dy - poly[i-1].dy);
-    }
-    area /= 2;
-    return area;
 */
+
+    int n = poly.length;
+    double area = 0.0;
+    for (int i = 0; i < n; i++) {
+      int j = (i + 1) % n;
+      area += poly[i].dx * poly[j].dy;
+      area -= poly[j].dx * poly[i].dy;
+    }
+    area = area.abs() / 2.0;
+    return area;
   }
   void drawText(Canvas canvas, Offset offset, String text, double size, {color = Colors.yellowAccent}) {
 /*
