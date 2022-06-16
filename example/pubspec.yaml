@@ -68,6 +68,8 @@ flutter:
   assets:
     - packages/mojo_perception/assets/face_landmark_with_attention.tflite
     - packages/mojo_perception/assets/face_detection_short_range.tflite
+    - packages/mojo_perception/assets/object_detection.tflite
+    - packages/mojo_perception/assets/test.jpg
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
 

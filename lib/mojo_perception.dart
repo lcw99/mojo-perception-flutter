@@ -34,6 +34,7 @@ import 'package:mojo_perception/services/face_detection/face_detection_service.d
 import 'package:mojo_perception/services/facemesh_service.dart';
 import 'package:mojo_perception/services/image_converter.dart';
 import 'package:mojo_perception/services/isolate_utils.dart';
+import 'package:mojo_perception/services/object_detection_service.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
@@ -85,18 +86,22 @@ class MojoPerceptionAPI {
 
   /// Variable to use the model that extract anonymized facial keypoints
   late Interpreter facemeshInterpreter;
+  late Interpreter objectInterpreter;
 
   /// Variable to use the model that extract anonymized facial keypoints
   late Interpreter faceDetectionInterpreter;
 
   /// Shape of landmarks detection model inputs
   late List<int> facemeshInputShape;
+  late List<int> objectInputShape;
+  late QuantizationParams objectInputParam;
 
   /// Shape of face detection model inputs
   late List<int> faceDetectionInputShape;
 
   /// Shapes of landmarks detection model outputs
   late List<List<int>> facemeshOutputsShapes = [];
+  late List<List<int>> objectOutputsShapes = [];
 
   /// Shapes of face detection model outputs
   late List<List<int>> faceDetectionOutputsShapes = [];
@@ -136,6 +141,7 @@ class MojoPerceptionAPI {
 
   /// Called on face detected
   late Function facemeshDetectedCallback;
+  late Function objectDetectedCallback;
 
   /// Called on no face detected
   late Function noFaceDetectedCallback;
@@ -148,6 +154,7 @@ class MojoPerceptionAPI {
 
   /// Whether the [facemeshInterpreter] is busy generating a prediction or not
   bool _predictingFacemesh = false;
+  bool _predictingObject = false;
 
   /// Used by default for all callbacks taking "data" as parameter. Does nothing.
   /// [message] not used
@@ -189,6 +196,7 @@ class MojoPerceptionAPI {
     firstEmitDoneCallback = defaultFirstEmitDoneFallback;
     faceDetectedCallback = defaultDataCallback;
     facemeshDetectedCallback = defaultDataCallback;
+    objectDetectedCallback = defaultDataCallback;
     noFaceDetectedCallback = defaultNoDataCallback;
   }
 
@@ -222,6 +230,10 @@ class MojoPerceptionAPI {
 
   /// Loads tflite model for landmarks detection from assets in [facemeshInterpreter]
   Future<bool> initInterpreters() async {
+
+    //final gpuDelegateV2 = GpuDelegateV2(options: GpuDelegateOptionsV2(isPrecisionLossAllowed: false));
+    //var interpreterOptions = InterpreterOptions()..addDelegate(gpuDelegateV2);
+    var interpreterOptions = InterpreterOptions();
     try {
       // face detection
       String faceDetectionModel =
@@ -234,22 +246,20 @@ class MojoPerceptionAPI {
 
       try {
         faceDetectionInterpreter =
-            Interpreter.fromBuffer(faceDetectionRawBytes);
+            Interpreter.fromBuffer(faceDetectionRawBytes, options: interpreterOptions);
       } catch (e) {
         onErrorCallback(e);
         return false;
       }
-      faceDetectionInputShape =
-          faceDetectionInterpreter.getInputTensor(0).shape;
-      final faceDetectionOutputTensors =
-      faceDetectionInterpreter.getOutputTensors();
+      var inputTensor = faceDetectionInterpreter.getInputTensor(0);
+      faceDetectionInputShape = inputTensor.shape;
+      final faceDetectionOutputTensors = faceDetectionInterpreter.getOutputTensors();
 
-      faceDetectionOutputTensors.forEach((tensor) {
+      for (var tensor in faceDetectionOutputTensors) {
         faceDetectionOutputsShapes.add(tensor.shape);
-      });
+      }
 
       // facemesh
-      final interpreterOptions = InterpreterOptions();
       String facemeshModel =
           "packages/mojo_perception/assets/face_landmark_with_attention.tflite";
       ByteData facemeshRawAssetFile = await rootBundle.load(facemeshModel);
@@ -266,9 +276,31 @@ class MojoPerceptionAPI {
       facemeshInputShape = facemeshInterpreter.getInputTensor(0).shape;
       final facemeshOutputTensors = facemeshInterpreter.getOutputTensors();
 
-      facemeshOutputTensors.forEach((tensor) {
+      for (var tensor in facemeshOutputTensors) {
         facemeshOutputsShapes.add(tensor.shape);
-      });
+      }
+
+      // object
+      String objectModel = "packages/mojo_perception/assets/object_detection.tflite";
+      ByteData objectRawAssetFile = await rootBundle.load(objectModel);
+
+      Uint8List objectRawBytes = objectRawAssetFile.buffer.asUint8List();
+
+      try {
+        objectInterpreter = Interpreter.fromBuffer(objectRawBytes, options: interpreterOptions);
+      } catch (e) {
+        onErrorCallback(e);
+        return false;
+      }
+      inputTensor = objectInterpreter.getInputTensor(0);
+      objectInputShape = inputTensor.shape;
+      objectInputParam = inputTensor.params;
+      final objectOutputTensors = objectInterpreter.getOutputTensors();
+
+      for (var tensor in objectOutputTensors) {
+        objectOutputsShapes.add(tensor.shape);
+      }
+
       return true;
     } on Exception catch (e) {
       onErrorCallback(e);
@@ -314,6 +346,12 @@ class MojoPerceptionAPI {
     if (!runningInference) {
       return;
     }
+
+    var detectionObject = await objectDetectionInference(cameraImage: cameraImage);
+    if (detectionObject != null) {
+      await objectDetectedCallback(detectionObject["object"]);
+    }
+
     var detection = await faceDetectionInference(cameraImage: cameraImage);
     if (detection == null) {
       return;
@@ -331,8 +369,8 @@ class MojoPerceptionAPI {
       image = img.flipHorizontal(image);
     }
 
-    double xMargin = detectedFace.width * 0.25;
-    double yMargin = detectedFace.height * 0.25;
+    double xMargin = detectedFace.width * 0.20;
+    double yMargin = detectedFace.height * 0.20;
     int left = (detectedFace.topLeft.dx - xMargin).round();
     int top = (detectedFace.topLeft.dy - yMargin).round();
     img.Image cropped = img.copyCrop(
@@ -342,7 +380,8 @@ class MojoPerceptionAPI {
         (detectedFace.width + xMargin * 2).round(),
         (detectedFace.height + yMargin * 2).round());
 
-    var result = await facemeshInference(cameraImage: cropped);
+    Map<String, dynamic>? result;
+    result = await facemeshInference(cameraImage: cropped);
 
     if (result != null) {
       List<List<double>> facemesh = result["facemesh"];
@@ -360,7 +399,13 @@ class MojoPerceptionAPI {
   /// Initializes [_isolateUtils] and [facemeshInterpreter]
   /// Gets access to the camera, and starts imageStream.
   /// Connects to socketIO.
+
+  img.Image? testImage;
   Future<CameraController?> startCameraAndConnectAPI() async {
+    String imageAsset = "packages/mojo_perception/assets/test.jpg";
+    ByteData objectRawAssetFile = await rootBundle.load(imageAsset);
+    testImage = img.decodeJpg(objectRawAssetFile.buffer.asUint8List());
+
     _predictingFaceDetection = false;
     _predictingFacemesh = false;
     firstEmitDone = false;
@@ -468,6 +513,7 @@ class MojoPerceptionAPI {
       handler: runFaceMesh,
       params: {
         'cameraImage': cameraImage,
+        'testImage' : testImage,
         'detectorAddress': facemeshInterpreter.address,
         'inputShape': facemeshInputShape,
         'outputsShapes': facemeshOutputsShapes
@@ -480,6 +526,36 @@ class MojoPerceptionAPI {
     responsePort.close();
 
     _predictingFacemesh = false;
+    return inferenceResults;
+  }
+
+  Future<Map<String, dynamic>?> objectDetectionInference(
+      {required CameraImage cameraImage}) async {
+    if (_predictingObject) {
+      return null;
+    }
+
+    _predictingObject = true;
+
+    final responsePort = ReceivePort();
+
+    _isolateUtils.sendMessage(
+      handler: runObjectDetect,
+      params: {
+        'cameraImage': cameraImage,
+        'detectorAddress': objectInterpreter.address,
+        'inputShape': objectInputShape,
+        'inputParam' : objectInputParam,
+        'outputsShapes': objectOutputsShapes
+      },
+      sendPort: _isolateUtils.sendPort,
+      responsePort: responsePort,
+    );
+
+    Map<String, dynamic>? inferenceResults = await responsePort.first;
+    responsePort.close();
+
+    _predictingObject = false;
     return inferenceResults;
   }
 

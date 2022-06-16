@@ -184,12 +184,21 @@ class FaceWidgetState extends State<FaceWidget> {
         (_) => widget.mojoPerceptionApi.faceDetectedCallback = myCallback);
     WidgetsBinding.instance.addPostFrameCallback(
         (_) => widget.mojoPerceptionApi.facemeshDetectedCallback = facemeshCallback);
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => widget.mojoPerceptionApi.objectDetectedCallback = objectCallback);
   }
 
   Rect? face;
   void myCallback(newFace) {
     setState(() {
       face = newFace;
+    });
+  }
+
+  List<double>? object;
+  void objectCallback(newObject) {
+    setState(() {
+      object = newObject;
     });
   }
 
@@ -220,17 +229,17 @@ class FaceWidgetState extends State<FaceWidget> {
   Widget build(BuildContext context) {
     var screenSize = MediaQuery.of(context).size;
     _ratio = screenSize.width / widget.mojoPerceptionApi.cameraController!.value.previewSize!.height * widget.scale;
-    return face != null
-        ? Stack(children: [
-            //CustomPaint(painter: FaceDetectionPainter(face!, _ratio)),
-            RepaintBoundary(key: facePaintKey,
-                child: SizedBox(
-                    width: screenSize.width, height: screenSize.height,
-                    child: CustomPaint(painter: FacemeshPainter(facemesh, _ratio, testedImageUI, topLeft, showCroppedImage))
-                )
-            )
-          ])
-        : Container();
+    return Stack(children: [
+      face != null ? RepaintBoundary(key: facePaintKey,
+          child: SizedBox(
+              width: screenSize.width, height: screenSize.height,
+              child: CustomPaint(painter: FacemeshPainter(facemesh, _ratio, testedImageUI, topLeft, showCroppedImage))
+          )
+      ) : const SizedBox(),
+      face != null ? CustomPaint(painter: FaceDetectionPainter(face!, _ratio)) : const SizedBox(),
+      object != null ? CustomPaint(painter: ObjectDetectionPainter(object!, _ratio),
+          size: Size(screenSize.width, screenSize.height)) : const SizedBox(),
+    ]);
   }
 }
 
@@ -260,6 +269,60 @@ class FaceDetectionPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => true;
+}
+
+class ObjectDetectionPainter extends CustomPainter {
+  final List<double> object;
+  final double ratio;
+
+  ObjectDetectionPainter(
+      this.object,
+      this.ratio,
+      );
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (object.length == 5) {
+      var paint = Paint()
+        ..color = Colors.yellowAccent
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round;
+
+      Rect bbox = Rect.fromLTRB(object[1], object[2], object[3], object[4]);
+      Offset topLeft = bbox.topLeft * ratio;
+      Offset bottomRight = bbox.bottomRight * ratio;
+      canvas.drawRect(Rect.fromPoints(topLeft, bottomRight), paint);
+      drawText(canvas, Offset(10, size.height - 20), '카드:' + (object[0] * 100).toStringAsFixed(2), 15);
+    }
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => true;
+}
+
+void drawText(Canvas canvas, Offset offset, String text, double size, {color = Colors.yellowAccent}) {
+/*
+    var textStyle = TextStyle(
+      fontFeatures: const [UI.FontFeature.tabularFigures()],
+      color: Colors.black,
+      fontSize: size,
+    );
+*/
+  var textStyle = GoogleFonts.getFont('Nanum Gothic Coding').copyWith(
+      fontSize: size,
+      color: color,
+      backgroundColor: Colors.black87);
+  final textSpan = TextSpan(
+    text: text,
+    style: textStyle,
+  );
+  final textPainter = TextPainter(
+    text: textSpan,
+    textDirection: TextDirection.ltr,
+  );
+  textPainter.layout();
+  textPainter.paint(canvas, offset);
 }
 
 class FacemeshPainter extends CustomPainter {
@@ -425,27 +488,6 @@ class FacemeshPainter extends CustomPainter {
     area = area.abs() / 2.0;
     return area;
   }
-  void drawText(Canvas canvas, Offset offset, String text, double size, {color = Colors.yellowAccent}) {
-/*
-    var textStyle = TextStyle(
-      fontFeatures: const [UI.FontFeature.tabularFigures()],
-      color: Colors.black,
-      fontSize: size,
-    );
-*/
-    var textStyle = GoogleFonts.getFont('Nanum Gothic Coding').copyWith(fontSize: size, color: color);
-    final textSpan = TextSpan(
-      text: text,
-      style: textStyle,
-    );
-    final textPainter = TextPainter(
-      text: textSpan,
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
-    textPainter.paint(canvas, offset);
-  }
-
 
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => true;
