@@ -21,6 +21,7 @@
 /// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ///
 /// =============================================================================
+import 'dart:developer';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -37,6 +38,7 @@ import 'package:mojo_perception/services/isolate_utils.dart';
 import 'package:mojo_perception/services/object_detection_service.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 
 /// Flutter client for Mojo Perception API
 ///
@@ -336,6 +338,7 @@ class MojoPerceptionAPI {
   }
 
   bool runningInference = true;
+  bool firstTime = false;
   void controlInference(bool runInference) {
     runningInference = runInference;
   }
@@ -347,6 +350,16 @@ class MojoPerceptionAPI {
       return;
     }
 
+    if (firstTime) {
+      firstTime = false;
+      img.Image? image = ImageConverter.convertCameraImage(cameraImage);
+      if (Platform.isAndroid) {
+        image = img.copyRotate(image!, -90);
+        image = img.flipHorizontal(image);
+      }
+      final result = await ImageGallerySaver.saveImage(Uint8List.fromList(img.encodeJpg(image!)));
+      log('result=$result', name:'lcw');
+    }
     var detectionObject = await objectDetectionInference(cameraImage: cameraImage);
     if (detectionObject != null) {
       await objectDetectedCallback(detectionObject["object"]);
@@ -426,6 +439,7 @@ class MojoPerceptionAPI {
       ResolutionPreset.medium,
       //ResolutionPreset.high,
       enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.bgra8888,
     );
     await cameraController!.initialize();
 

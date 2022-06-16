@@ -32,6 +32,7 @@ class ImageConverter {
     final width = cameraImage.width;
     final height = cameraImage.height;
 
+    final yRowStride = cameraImage.planes[0].bytesPerRow;
     final uvRowStride = cameraImage.planes[1].bytesPerRow;
     final uvPixelStride = cameraImage.planes[1].bytesPerPixel!;
 
@@ -42,8 +43,9 @@ class ImageConverter {
         final uvIndex =
             uvPixelStride * (w / 2).floor() + uvRowStride * (h / 2).floor();
         final index = h * width + w;
+        final yIndex = h * yRowStride + w;
 
-        final y = cameraImage.planes[0].bytes[index];
+        final y = cameraImage.planes[0].bytes[yIndex];
         final u = cameraImage.planes[1].bytes[uvIndex];
         final v = cameraImage.planes[2].bytes[uvIndex];
 
