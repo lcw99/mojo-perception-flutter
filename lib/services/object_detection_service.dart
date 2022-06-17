@@ -126,14 +126,18 @@ Map<String, dynamic>? runObjectDetect(Map<String, dynamic> params) {
   Map<String, dynamic>? result;
   if (testImage != null) {
     result = objectDetection.predict(testImage);
-  } else {
-    var image = ImageConverter.convertCameraImage(params['cameraImage'])!;
-    if (Platform.isAndroid) {
-      image = img.copyRotate(image, -90);
-      image = img.flipHorizontal(image);
-    }
-    result = objectDetection.predict(image);
+    return result;
   }
+
+/*
+  var image = ImageConverter.convertCameraImage(params['cameraImage'])!;
+  if (Platform.isAndroid) {
+    image = img.copyRotate(image, -90);
+    image = img.flipHorizontal(image);
+  }
+*/
+  var image = params['cameraImage'];
+  result = objectDetection.predict(image);
 
   return result;
 }

@@ -350,6 +350,7 @@ class MojoPerceptionAPI {
       return;
     }
 
+/*
     if (firstTime) {
       firstTime = false;
       img.Image? image = ImageConverter.convertCameraImage(cameraImage);
@@ -360,12 +361,9 @@ class MojoPerceptionAPI {
       final result = await ImageGallerySaver.saveImage(Uint8List.fromList(img.encodeJpg(image!)));
       log('result=$result', name:'lcw');
     }
-    var detectionObject = await objectDetectionInference(cameraImage: cameraImage);
-    if (detectionObject != null) {
-      await objectDetectedCallback(detectionObject["object"]);
-    }
+*/
 
-    var detection = await faceDetectionInference(cameraImage: cameraImage);
+    Map<String, dynamic>? detection = await faceDetectionInference(cameraImage: cameraImage);
     if (detection == null) {
       return;
     }
@@ -392,6 +390,12 @@ class MojoPerceptionAPI {
         top,
         (detectedFace.width + xMargin * 2).round(),
         (detectedFace.height + yMargin * 2).round());
+
+    Map<String, dynamic>? detectionObject;
+    detectionObject = await objectDetectionInference(cameraImage: cropped);
+    if (detectionObject != null) {
+      await objectDetectedCallback(detectionObject["object"], Offset(left.toDouble(), top.toDouble()));
+    }
 
     Map<String, dynamic>? result;
     result = await facemeshInference(cameraImage: cropped);
@@ -544,7 +548,7 @@ class MojoPerceptionAPI {
   }
 
   Future<Map<String, dynamic>?> objectDetectionInference(
-      {required CameraImage cameraImage}) async {
+      {required img.Image cameraImage}) async {
     if (_predictingObject) {
       return null;
     }

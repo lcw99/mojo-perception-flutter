@@ -196,8 +196,10 @@ class FaceWidgetState extends State<FaceWidget> {
   }
 
   List<double>? object;
-  void objectCallback(newObject) {
+  Offset? topLeftObject;
+  void objectCallback(newObject, offset) {
     setState(() {
+      topLeftObject = offset;
       object = newObject;
     });
   }
@@ -237,7 +239,7 @@ class FaceWidgetState extends State<FaceWidget> {
           )
       ) : const SizedBox(),
       face != null ? CustomPaint(painter: FaceDetectionPainter(face!, _ratio)) : const SizedBox(),
-      object != null ? CustomPaint(painter: ObjectDetectionPainter(object!, _ratio),
+      object != null ? CustomPaint(painter: ObjectDetectionPainter(object!, _ratio, topLeftObject!),
           size: Size(screenSize.width, screenSize.height)) : const SizedBox(),
     ]);
   }
@@ -274,10 +276,12 @@ class FaceDetectionPainter extends CustomPainter {
 class ObjectDetectionPainter extends CustomPainter {
   final List<double> object;
   final double ratio;
+  final Offset topLeftObject;
 
   ObjectDetectionPainter(
       this.object,
       this.ratio,
+      this.topLeftObject,
       );
 
   @override
@@ -289,9 +293,10 @@ class ObjectDetectionPainter extends CustomPainter {
         ..strokeWidth = 3
         ..strokeCap = StrokeCap.round;
 
+      Offset topLeft1 = topLeftObject * ratio;
       Rect bbox = Rect.fromLTRB(object[1], object[2], object[3], object[4]);
-      Offset topLeft = bbox.topLeft * ratio;
-      Offset bottomRight = bbox.bottomRight * ratio;
+      Offset topLeft = bbox.topLeft * ratio + topLeft1;
+      Offset bottomRight = bbox.bottomRight * ratio + topLeft1;
       canvas.drawRect(Rect.fromPoints(topLeft, bottomRight), paint);
       drawText(canvas, Offset(10, size.height - 20), '카드:' + (object[0] * 100).toStringAsFixed(2), 15);
     }
